@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="24dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Enter Verification Code"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="8dp"
+        android:textColor="#212121"/>
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="A 6-digit code has been sent to your phone."
+        android:textSize="14sp"
+        android:layout_marginBottom="24dp"
+        android:textColor="#757575"/>
+
+    <EditText
+        android:id="@+id/otp_code"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="123456"
+        android:inputType="number"
+        android:maxLength="6"
+        android:gravity="center"
+        android:letterSpacing="0.5"
+        android:textSize="24sp"
+        android:background="@android:drawable/edit_text"
+        android:padding="12dp"
+        android:layout_marginBottom="24dp"/>
+
+    <Button
+        android:id="@+id/verify_otp_btn"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Verify &amp; Sign In"
+        android:backgroundTint="#2E7D32"
+        android:textColor="#FFFFFF" />
+
+</LinearLayout>

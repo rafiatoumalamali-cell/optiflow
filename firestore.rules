@@ -1,0 +1,378 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null && request.auth.uid != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+    
+    function isBusinessOwner(businessId) {
+      return isAuthenticated() && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.businessId == businessId;
+    }
+    
+    function isBusinessAdmin(businessId) {
+      return isAuthenticated() && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.businessId == businessId &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+    
+    function isDriver(businessId) {
+      return isAuthenticated() && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.businessId == businessId &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'driver';
+    }
+    
+    function isManager(businessId) {
+      return isAuthenticated() && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.businessId == businessId &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'manager';
+    }
+    
+    function isValidTimestamp(timestamp) {
+      return timestamp is timestamp && 
+             timestamp <= request.time && 
+             timestamp > (request.time - 86400000); // Not more than 24 hours in the future
+    }
+    
+    function isValidEmail(email) {
+      return email is string && 
+             email.matches('^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$');
+    }
+    
+    function isValidPhoneNumber(phone) {
+      return phone is string && 
+             phone.matches('^[+]?[0-9]{10,15}$');
+    }
+    
+    function isValidId(id) {
+      return id is string && 
+             id.size() > 0 && 
+             id.size() <= 128;
+    }
+    
+    function sanitizeString(input) {
+      return input is string ? input.replaceAll(/[<>\"'&]/g, '') : input;
+    }
+    
+    // Users collection - highly restricted
+    match /users/{userId} {
+      allow read, write: if isOwner(userId) && 
+                                   isValidId(userId) && 
+                                   request.auth.uid == userId;
+      
+      // Allow read for own profile
+      allow read: if isOwner(userId) && 
+                     isValidId(userId) && 
+                     request.auth.uid == userId;
+    }
+    
+    // Businesses collection - business-specific access
+    match /businesses/{businessId} {
+      allow read: if (isBusinessOwner(businessId) || 
+                     isBusinessAdmin(businessId) || 
+                     isManager(businessId) || 
+                     isAdmin()) && 
+                     isValidId(businessId);
+      
+      allow write: if (isBusinessOwner(businessId) || 
+                      isBusinessAdmin(businessId) || 
+                      isAdmin()) && 
+                      isValidId(businessId) &&
+                      // Validate business data
+                      request.resource.data.name is string &&
+                      request.resource.data.name.size() > 0 &&
+                      request.resource.data.name.size() <= 100 &&
+                      request.resource.data.type is string &&
+                      request.resource.data.type in ['manufacturing', 'distribution', 'retail', 'transport'] &&
+                      request.resource.data.country is string &&
+                      request.resource.data.country.size() == 2 &&
+                      request.resource.data.currency is string &&
+                      request.resource.data.currency.size() == 3;
+    }
+    
+    // Routes collection - role-based access
+    match /routes/{routeId} {
+      allow read: if (isBusinessOwner(businessId) || 
+                     isBusinessAdmin(businessId) || 
+                     isManager(businessId) || 
+                     isDriver(businessId) || 
+                     isAdmin()) && 
+                     isValidId(routeId) &&
+                     get(/databases/$(database)/documents/routes/$(routeId)).data.businessId == businessId;
+      
+      allow write: if (isBusinessOwner(businessId) || 
+                      isBusinessAdmin(businessId) || 
+                      isManager(businessId) || 
+                      isAdmin()) && 
+                      isValidId(routeId) &&
+                      get(/databases/$(database)/documents/routes/$(routeId)).data.businessId == businessId &&
+                      // Validate route data
+                      request.resource.data.name is string &&
+                      request.resource.data.name.size() > 0 &&
+                      request.resource.data.name.size() <= 100 &&
+                      request.resource.data.businessId is string &&
+                      request.resource.data.businessId == businessId &&
+                      request.resource.data.status in ['active', 'completed', 'cancelled', 'paused'] &&
+                      request.resource.data.createdBy is string &&
+                      isValidId(request.resource.data.createdBy);
+      
+      // Drivers can update route status
+      allow update: if isDriver(businessId) && 
+                       isValidId(routeId) &&
+                       get(/databases/$(database)/documents/routes/$(routeId)).data.businessId == businessId &&
+                       request.resource.data.diff(resource.data.data.changedKeys()).affectedKeys().hasOnly(['status']) &&
+                       request.resource.data.status in ['active', 'completed'];
+    }
+    
+    // Products collection - business-specific access
+    match /products/{productId} {
+      allow read: if (isBusinessOwner(businessId) || 
+                     isBusinessAdmin(businessId) || 
+                     isManager(businessId) || 
+                     isAdmin()) && 
+                     isValidId(productId) &&
+                     get(/databases/$(database)/documents/products/$(productId)).data.businessId == businessId;
+      
+      allow write: if (isBusinessOwner(businessId) || 
+                      isBusinessAdmin(businessId) || 
+                      isManager(businessId) || 
+                      isAdmin()) && 
+                      isValidId(productId) &&
+                      get(/databases/$(database)/documents/products/$(productId)).data.businessId == businessId &&
+                      // Validate product data
+                      request.resource.data.name is string &&
+                      request.resource.data.name.size() > 0 &&
+                      request.resource.data.name.size() <= 100 &&
+                      request.resource.data.businessId is string &&
+                      request.resource.data.businessId == businessId &&
+                      request.resource.data.unitType is string &&
+                      request.resource.data.unitType in ['kg', 'liters', 'pieces', 'boxes'] &&
+                      request.resource.data.price is number &&
+                      request.resource.data.price >= 0 &&
+                      request.resource.data.price <= 1000000;
+    }
+    
+    // Orders collection - comprehensive access control
+    match /orders/{orderId} {
+      allow read: if (isBusinessOwner(businessId) || 
+                     isBusinessAdmin(businessId) || 
+                     isManager(businessId) || 
+                     isDriver(businessId) || 
+                     isAdmin()) && 
+                     isValidId(orderId) &&
+                     get(/databases/$(database)/documents/orders/$(orderId)).data.businessId == businessId;
+      
+      allow write: if (isBusinessOwner(businessId) || 
+                      isBusinessAdmin(businessId) || 
+                      isManager(businessId) || 
+                      isAdmin()) && 
+                      isValidId(orderId) &&
+                      get(/databases/$(database)/documents/orders/$(orderId)).data.businessId == businessId &&
+                      // Validate order data
+                      request.resource.data.customerName is string &&
+                      request.resource.data.customerName.size() > 0 &&
+                      request.resource.data.customerName.size() <= 100 &&
+                      request.resource.data.businessId is string &&
+                      request.resource.data.businessId == businessId &&
+                      request.resource.data.totalAmount is number &&
+                      request.resource.data.totalAmount >= 0 &&
+                      request.resource.data.status in ['pending', 'confirmed', 'processing', 'completed', 'cancelled'];
+      
+      // Drivers can update order status
+      allow update: if isDriver(businessId) && 
+                       isValidId(orderId) &&
+                       get(/databases/$(database)/documents/orders/$(orderId)).data.businessId == businessId &&
+                       request.resource.data.diff(resource.data.data.changedKeys()).affectedKeys().hasOnly(['status', 'deliveryNotes']) &&
+                       request.resource.data.status in ['confirmed', 'processing', 'completed'];
+    }
+    
+    // Locations collection - business-specific access
+    match /locations/{locationId} {
+      allow read: if (isBusinessOwner(businessId) || 
+                     isBusinessAdmin(businessId) || 
+                     isManager(businessId) || 
+                     isDriver(businessId) || 
+                     isAdmin()) && 
+                     isValidId(locationId) &&
+                     get(/databases/$(database)/documents/locations/$(locationId)).data.businessId == businessId;
+      
+      allow write: if (isBusinessOwner(businessId) || 
+                      isBusinessAdmin(businessId) || 
+                      isManager(businessId) || 
+                      isAdmin()) && 
+                      isValidId(locationId) &&
+                      get(/databases/$(database)/documents/locations/$(locationId)).data.businessId == businessId &&
+                      // Validate location data
+                      request.resource.data.name is string &&
+                      request.resource.data.name.size() > 0 &&
+                      request.resource.data.name.size() <= 100 &&
+                      request.resource.data.businessId is string &&
+                      request.resource.data.businessId == businessId &&
+                      request.resource.data.address is string &&
+                      request.resource.data.address.size() > 0 &&
+                      request.resource.data.address.size() <= 500 &&
+                      request.resource.data.latitude is number &&
+                      request.resource.data.latitude >= -90 &&
+                      request.resource.data.latitude <= 90 &&
+                      request.resource.data.longitude is number &&
+                      request.resource.data.longitude >= -180 &&
+                      request.resource.data.longitude <= 180;
+    }
+    
+    // Notifications collection - user-specific access
+    match /notifications/{notificationId} {
+      allow read: if isOwner(userId) && 
+                     isValidId(notificationId) &&
+                     get(/databases/$(database)/documents/notifications/$(notificationId)).data.userId == request.auth.uid;
+      
+      allow write: if isOwner(userId) && 
+                      isValidId(notificationId) &&
+                      get(/databases/$(database)/documents/notifications/$(notificationId)).data.userId == request.auth.uid &&
+                      // Validate notification data
+                      request.resource.data.title is string &&
+                      request.resource.data.title.size() > 0 &&
+                      request.resource.data.title.size() <= 200 &&
+                      request.resource.data.message is string &&
+                      request.resource.data.message.size() > 0 &&
+                      request.resource.data.message.size() <= 1000 &&
+                      request.resource.data.type in ['info', 'warning', 'error', 'success'];
+    }
+    
+    // Analytics collection - admin and business owner access
+    match /analytics/{analyticsId} {
+      allow read: if (isBusinessOwner(businessId) || 
+                     isBusinessAdmin(businessId) || 
+                     isManager(businessId) || 
+                     isAdmin()) && 
+                     isValidId(analyticsId) &&
+                     get(/databases/$(database)/documents/analytics/$(analyticsId)).data.businessId == businessId;
+      
+      allow write: if (isBusinessOwner(businessId) || 
+                      isBusinessAdmin(businessId) || 
+                      isAdmin()) && 
+                      isValidId(analyticsId) &&
+                      get(/databases/$(database)/documents/analytics/$(analyticsId)).data.businessId == businessId &&
+                      // Validate analytics data
+                      request.resource.data.businessId is string &&
+                      request.resource.data.businessId == businessId &&
+                      request.resource.data.metricType is string &&
+                      request.resource.data.metricType in ['revenue', 'orders', 'deliveries', 'routes', 'efficiency'] &&
+                      request.resource.data.value is number &&
+                      request.resource.data.timestamp is timestamp &&
+                      isValidTimestamp(request.resource.data.timestamp);
+    }
+    
+    // Reports collection - role-based access
+    match /reports/{reportId} {
+      allow read: if (isBusinessOwner(businessId) || 
+                     isBusinessAdmin(businessId) || 
+                     isManager(businessId) || 
+                     isAdmin()) && 
+                     isValidId(reportId) &&
+                     get(/databases/$(database)/documents/reports/$(reportId)).data.businessId == businessId;
+      
+      allow write: if (isBusinessOwner(businessId) || 
+                      isBusinessAdmin(businessId) || 
+                      isManager(businessId) || 
+                      isAdmin()) && 
+                      isValidId(reportId) &&
+                      get(/databases/$(database)/documents/reports/$(reportId)).data.businessId == businessId &&
+                      // Validate report data
+                      request.resource.data.businessId is string &&
+                      request.resource.data.businessId == businessId &&
+                      request.resource.data.reportType is string &&
+                      request.resource.data.reportType in ['daily', 'weekly', 'monthly', 'quarterly', 'yearly'] &&
+                      request.resource.data.generatedBy is string &&
+                      isValidId(request.resource.data.generatedBy) &&
+                      request.resource.data.period is timestamp &&
+                      isValidTimestamp(request.resource.data.period);
+    }
+    
+    // Settings collection - user-specific access
+    match /settings/{settingId} {
+      allow read: if isOwner(userId) && 
+                     isValidId(settingId) &&
+                     get(/databases/$(database)/documents/settings/$(settingId)).data.userId == request.auth.uid;
+      
+      allow write: if isOwner(userId) && 
+                      isValidId(settingId) &&
+                      get(/databases/$(database)/documents/settings/$(settingId)).data.userId == request.auth.uid &&
+                      // Validate settings data
+                      request.resource.data.userId is string &&
+                      request.resource.data.userId == request.auth.uid &&
+                      request.resource.data.key is string &&
+                      request.resource.data.key.size() > 0 &&
+                      request.resource.data.key.size() <= 100 &&
+                      request.resource.data.value is string &&
+                      request.resource.data.value.size() <= 1000;
+    }
+    
+    // Sync queue collection - system and admin access
+    match /sync_queue/{syncId} {
+      allow read: if isAdmin() && 
+                     isValidId(syncId);
+      
+      allow write: if isAdmin() && 
+                      isValidId(syncId) &&
+                      // Validate sync queue data
+                      request.resource.data.operationType is string &&
+                      request.resource.data.operationType in ['create', 'update', 'delete'] &&
+                      request.resource.data.collection is string &&
+                      request.resource.data.collection in ['routes', 'orders', 'products', 'locations'] &&
+                      request.resource.data.data is string &&
+                      request.resource.data.data.size() > 0 &&
+                      request.resource.data.data.size() <= 10000 &&
+                      request.resource.data.timestamp is timestamp &&
+                      isValidTimestamp(request.resource.data.timestamp);
+    }
+    
+    // Admin logs collection - admin only
+    match /admin_logs/{logId} {
+      allow read: if isAdmin() && 
+                     isValidId(logId);
+      
+      allow write: if isAdmin() && 
+                      isValidId(logId) &&
+                      // Validate admin log data
+                      request.resource.data.action is string &&
+                      request.resource.data.action.size() > 0 &&
+                      request.resource.data.action.size() <= 100 &&
+                      request.resource.data.userId is string &&
+                      isValidId(request.resource.data.userId) &&
+                      request.resource.data.timestamp is timestamp &&
+                      isValidTimestamp(request.resource.data.timestamp) &&
+                      request.resource.data.ipAddress is string &&
+                      request.resource.data.ipAddress.matches(/^([0-9]{1,3}\\.){3}[0-9]{1,3}$/);
+    }
+    
+    // System configuration collection - admin only
+    match /system_config/{configId} {
+      allow read: if isAdmin() && 
+                     isValidId(configId);
+      
+      allow write: if isAdmin() && 
+                      isValidId(configId) &&
+                      // Validate system config data
+                      request.resource.data.key is string &&
+                      request.resource.data.key.size() > 0 &&
+                      request.resource.data.key.size() <= 100 &&
+                      request.resource.data.value is string &&
+                      request.resource.data.value.size() <= 1000;
+    }
+    
+    // Deny all other access
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,0 +1,59 @@
+plugins {
+    id("com.android.application")
+    id("dev.flutter.flutter-gradle-plugin")
+    id("kotlin-android")
+    id("com.google.gms.google-services")
+}
+
+android {
+    namespace = "com.example.optiflow"
+    compileSdk = 36
+    ndkVersion = "27.0.12077973"
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+
+    defaultConfig {
+        applicationId = "com.example.optiflow"
+        minSdk = flutter.minSdkVersion
+        targetSdk = 36
+        versionCode = flutter.versionCode
+        versionName = flutter.versionName
+    }
+
+    buildTypes {
+        release {
+            signingConfig = signingConfigs.getByName("debug")
+            isMinifyEnabled = false
+            isShrinkResources = false
+        }
+    }
+}
+
+// ✅ Correct Kotlin DSL syntax for APK output configuration
+android.applicationVariants.forEach { variant ->
+    variant.outputs.forEach { output ->
+        if (output is com.android.build.gradle.internal.api.ApkVariantOutputImpl) {
+            output.outputFileName = "app-${variant.name}.apk"
+        }
+    }
+}
+
+dependencies {
+    implementation(platform("com.google.firebase:firebase-bom:34.11.0"))
+    implementation("com.google.firebase:firebase-analytics")
+    implementation("com.google.firebase:firebase-auth")
+    implementation("com.google.firebase:firebase-firestore")
+    implementation("com.google.firebase:firebase-messaging")
+    implementation("com.google.firebase:firebase-storage")
+}
+
+flutter {
+    source = "../.."
+}
